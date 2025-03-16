@@ -1,33 +1,31 @@
 """
 برنامه ای ساده برای نشان دادن اوقات شرعی برای منطقه تجریش تهران - ایران.  شما میتوانید به سادگی موقعیت
-مکانی (محله، شهر و کشور) را از داخل برنامه تغییر دهید.  همچنین وضعیت آب و هوا و درجه حرارت روز نمایش
+مکانی (محله، شهر و کشور) را از داخل برنامه تغییر دهید.  همچنین وضعیت آب و هوا و درجه حرارت روز به همراه درجه حرارت واقعی که با توجه به شرایط احساس میشود نمایش
 داده میشود.  DLord
 """
 
-import sys
 from datetime import date
-from io import BytesIO, StringIO
+from io import BytesIO
 
 import certifi
 import pycurl
-import PySimpleGUI as sg
+import FreeSimpleGUI as sg
 import requests
-from art import tprint
+from art import text2art
 from persiantools.jdatetime import JalaliDate, digits
 
-SCRIPT_VERSION = "1.1"
+SCRIPT_VERSION = "2.0"
 WINDOW_TITLE = f"Islamic Prayer Times Farsi by DLord (v{SCRIPT_VERSION})"
 
 # ابنجا میتوانید نام منطقه، شهر و کشور مورد نظر خودتان را تغییر دهید
-Area = "Tajrish"
-City = "Tehran"
-Country = "Iran"
+AREA = "Tajrish"  # میتوانید وارد نکنید و بصورت "" خالی بگذارید
+CITY = "Tehran"
+COUNTRY = "Iran"
 
 
 def get_date() -> str:
     """Get todays date and retuen formated string."""
-    today = date.today()
-    return today.strftime("%A %d-%b-%y")
+    return date.today().strftime("%A %d-%b-%y")
 
 
 def get_jalali_date() -> str:
@@ -57,21 +55,22 @@ def get_jalali_date() -> str:
     }
     jdate = str([JalaliDate.today()])[12:-2]
     jlist = jdate.replace(" ", "").split(",")
-    todayJ = days[jlist[3]] + ", " + jlist[2] + " " + months[jlist[1]] + ", " + jlist[0]
+    todayJ = days[jlist[3]] + ", " + jlist[2] + " " + months[jlist[1]] + " " + jlist[0]
     return digits.en_to_fa(todayJ)
 
 
-def ascii_art() -> None:
+def ascii_art() -> str:
     """Print an ascii art with random font of author's name."""
     author = "DLord"
-    tprint("\n\n" + author, font="random")
+    return text2art(author, font="random-medium")
 
 
 def get_weather(loc) -> str:
+    """Get weather data for the Area if present, otherwise for the City"""
     buffer = BytesIO()
     c = pycurl.Curl()
     c.setopt(pycurl.TIMEOUT, 4)
-    c.setopt(c.URL, f"https://wttr.in/{loc}?format=1")
+    c.setopt(c.URL, f"https://wttr.in/{loc}?format=%l:+%c+%t+(%f)")
     c.setopt(c.WRITEDATA, buffer)
     c.setopt(c.CAINFO, certifi.where())
     try:
@@ -79,34 +78,38 @@ def get_weather(loc) -> str:
         c.close()
         body = (buffer.getvalue()).decode("utf-8")
     except pycurl.error:
-        body = "Weather data not available!"
+        body = "اطلاعات هواشناسی در دسترس نیست"
     return digits.en_to_fa(body)
 
 
-if __name__ == "__main__":
+def main():
     try:
-        tmp = sys.stdout
-        my_result = StringIO()
-        sys.stdout = my_result
         response = requests.get(
-            f"http://api.aladhan.com/v1/timingsByAddress?address={Area}%2C+{City}%2C+{Country}&method=7&midnightMode=1",
+            f"http://api.aladhan.com/v1/timingsByAddress?address={AREA}%2C+{CITY}%2C+{COUNTRY}&method=7&midnightMode=1",
             timeout=10,
         )
         response.raise_for_status()
         timings = response.json()["data"]["timings"]
-        print("اوقات شرعی برای: ", get_jalali_date())
-        print(f"{City} ({Area}) - {Country} :موقعیت")
-        print(get_weather(City))
-        print(
-            digits.en_to_fa(
-                f"\nاذان صبح: {timings['Fajr']}\nطلوع آفتاب: {timings['Sunrise']}\nاذان ظهر: {timings['Dhuhr']}\nاذان عصر: {timings['Asr']}\nغروب آفتاب: {timings['Sunset']}\nاذان مغرب: {timings['Maghrib']}\nاذان عشاء: {timings['Isha']}\nنیمه شب شرعی: {timings['Midnight']}"
-            )
+        header1_date = f"{get_jalali_date()}"
+        header2_location = (
+            f"\n{CITY} ({AREA}) - {COUNTRY} : موقعیت"
+            if AREA != ""
+            else f"\n{CITY} - {COUNTRY} : موقعیت"
         )
-        ascii_art()
-        sys.stdout = tmp
+        header3_weather = (
+            f"\n {get_weather(AREA)}\n\n"
+            if AREA != ""
+            else f"\n {get_weather(CITY)}\n\n"
+        )
+        body = digits.en_to_fa(
+            f"\nاذان صبح: {timings['Fajr']}\nطلوع آفتاب: {timings['Sunrise']}\nاذان ظهر: {timings['Dhuhr']}\nاذان عصر: {timings['Asr']}\nغروب آفتاب: {timings['Sunset']}\nاذان مغرب: {timings['Maghrib']}\nاذان عشاء: {timings['Isha']}\nنیمه شب شرعی: {timings['Midnight']}\n\n\n"
+        )
+        output_text = (
+            header1_date + header2_location + header3_weather + body + ascii_art()
+        )
         sg.theme("DarkGrey5")
         layout = [
-            [sg.Text(my_result.getvalue(), font=("Cascadia Code", 12))],
+            [sg.Text(output_text, font=("Cascadia Code", 12))],
             [sg.Button("Close")],
         ]
         window = sg.Window(
@@ -114,7 +117,6 @@ if __name__ == "__main__":
             layout,
             element_justification="c",
             text_justification="c",
-            resizable=True,
         )
         while True:
             event, values = window.read()
@@ -132,3 +134,7 @@ if __name__ == "__main__":
             element_justification="c",
             text_justification="c",
         ).read()
+
+if __name__ == "__main__":
+    main()
+
